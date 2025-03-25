@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Layout from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,10 +11,10 @@ import {
   TableHeader, 
   TableRow 
 } from '@/components/ui/table';
-import { ArrowLeft, Download, Plus, Wand2 } from 'lucide-react';
+import { ArrowLeft, Download, Plus, Printer, Wand2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -23,6 +23,7 @@ type Subject = {
   name: string;
   type: 'Main' | 'Secondary' | 'Elective';
   classesPerWeek: number;
+  daysPerWeek?: number;
 };
 
 type Teacher = {
@@ -65,6 +66,7 @@ const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satur
 export default function TimetableGenerator() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const printRef = useRef<HTMLDivElement>(null);
   
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -74,9 +76,9 @@ export default function TimetableGenerator() {
   
   const [timetable, setTimetable] = useState<WeekSchedule>({});
   const [isGenerated, setIsGenerated] = useState(false);
-  const [selectedDay, setSelectedDay] = useState('Monday');
-  const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedDay, setSelectedDay] = useState<string>('');
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('');
   const [selectedSubject, setSelectedSubject] = useState<string>('');
   const [selectedTeacher, setSelectedTeacher] = useState<string>('');
   
@@ -293,6 +295,89 @@ export default function TimetableGenerator() {
     });
   };
   
+  const handlePrintTimetable = () => {
+    if (!printRef.current) return;
+    
+    const originalContents = document.body.innerHTML;
+    const printContents = printRef.current.innerHTML;
+    
+    // Create a new window for printing
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast({
+        title: "Print Error",
+        description: "Could not open print window. Please check your popup settings.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Add necessary styles
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Timetable - ${selectedClass} Section ${selectedSection}</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              padding: 20px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 20px;
+            }
+            th, td {
+              border: 1px solid #ddd;
+              padding: 8px;
+              text-align: left;
+            }
+            th {
+              background-color: #f2f2f2;
+              font-weight: bold;
+            }
+            h1, h2 {
+              text-align: center;
+              margin-bottom: 10px;
+            }
+            .break-cell {
+              background-color: #f9f9f9;
+              font-style: italic;
+              text-align: center;
+            }
+            .header-info {
+              text-align: center;
+              margin-bottom: 20px;
+            }
+            @media print {
+              body {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header-info">
+            <h1>Class Timetable</h1>
+            <h2>${selectedClass} - Section ${selectedSection}</h2>
+          </div>
+          ${printContents}
+        </body>
+      </html>
+    `);
+    
+    // Trigger print and close window after printing
+    printWindow.document.close();
+    printWindow.focus();
+    
+    // Add slight delay to ensure styles are loaded
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 250);
+  };
+  
   return (
     <Layout 
       title="Timetable Generator" 
@@ -326,102 +411,86 @@ export default function TimetableGenerator() {
               <Button 
                 variant="outline" 
                 disabled={!isGenerated}
+                onClick={handlePrintTimetable}
               >
-                <Download className="mr-2 h-4 w-4" />
-                Export
+                <Printer className="mr-2 h-4 w-4" />
+                Print
               </Button>
             </div>
           </CardHeader>
         </Card>
         
-        <Tabs defaultValue="Monday" value={selectedDay} onValueChange={setSelectedDay}>
-          <TabsList className="w-full mb-6 grid grid-cols-6">
-            {weekDays.map((day) => (
-              <TabsTrigger key={day} value={day} className="text-center">
-                {day}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          
-          {weekDays.map((day) => (
-            <TabsContent key={day} value={day} className="mt-0">
-              <Card>
-                <CardContent className="pt-6">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[120px]">Time</TableHead>
-                        <TableHead>Period</TableHead>
-                        <TableHead>Subject</TableHead>
-                        <TableHead>Teacher</TableHead>
-                        <TableHead className="text-right">Action</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {getAllPeriods().map((period) => {
-                        const timeSlot = period.type === 'Regular' ? timetable[day]?.[period.id] : null;
+        <div ref={printRef}>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[120px]">Time</TableHead>
+                      {weekDays.map(day => (
+                        <TableHead key={day}>{day}</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {getAllPeriods().map((period) => (
+                      <TableRow key={period.id}>
+                        <TableCell className="font-medium">
+                          <div>
+                            <div className="font-mono text-sm">
+                              {formatTime(period.startTime)} - {formatTime(period.endTime)}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {period.name}
+                            </div>
+                          </div>
+                        </TableCell>
                         
-                        return (
-                          <TableRow key={period.id}>
-                            <TableCell>
-                              <div className="font-mono text-sm">
-                                {formatTime(period.startTime)} - {formatTime(period.endTime)}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className={`font-medium ${period.type !== 'Regular' ? 'text-muted-foreground' : ''}`}>
-                                {period.name}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {period.type}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              {period.type === 'Regular' ? (
-                                timeSlot?.subject ? (
-                                  <div className="font-medium">{timeSlot.subject}</div>
-                                ) : (
-                                  <div className="text-muted-foreground">Not assigned</div>
-                                )
-                              ) : (
-                                <div className="text-muted-foreground">
+                        {weekDays.map((day) => {
+                          if (period.type !== 'Regular') {
+                            return (
+                              <TableCell key={day} className="bg-muted/30 text-center">
+                                <div className="text-muted-foreground font-medium">
                                   {period.type === 'Break' ? 'Short Break' : 'Lunch Break'}
+                                </div>
+                              </TableCell>
+                            );
+                          }
+                          
+                          const timeSlot = timetable[day]?.[period.id];
+                          
+                          return (
+                            <TableCell 
+                              key={day} 
+                              className={`cursor-pointer hover:bg-muted/50 transition-colors ${!timeSlot?.subject ? 'bg-muted/20' : ''}`}
+                              onClick={() => handleSlotClick(day, period.id)}
+                            >
+                              {timeSlot?.subject ? (
+                                <div>
+                                  <div className="font-medium">{timeSlot.subject}</div>
+                                  {timeSlot.teacher && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {timeSlot.teacher}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="flex justify-center items-center h-full">
+                                  <Plus className="h-4 w-4 text-muted-foreground" />
                                 </div>
                               )}
                             </TableCell>
-                            <TableCell>
-                              {period.type === 'Regular' ? (
-                                timeSlot?.teacher ? (
-                                  <div>{timeSlot.teacher}</div>
-                                ) : (
-                                  <div className="text-muted-foreground">Not assigned</div>
-                                )
-                              ) : (
-                                <div className="text-muted-foreground">-</div>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {period.type === 'Regular' && (
-                                <Button 
-                                  variant="outline" 
-                                  size="sm" 
-                                  onClick={() => handleSlotClick(day, period.id)}
-                                >
-                                  <Plus className="h-4 w-4 mr-1" />
-                                  Assign
-                                </Button>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          ))}
-        </Tabs>
+                          );
+                        })}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
       
       {/* Assignment Dialog */}

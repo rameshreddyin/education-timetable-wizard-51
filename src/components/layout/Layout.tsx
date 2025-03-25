@@ -7,11 +7,12 @@ type LayoutProps = {
   children: React.ReactNode;
   title?: string;
   subtitle?: string;
+  className?: string;
 };
 
-export default function Layout({ children, title, subtitle }: LayoutProps) {
+export default function Layout({ children, title, subtitle, className }: LayoutProps) {
   return (
-    <div className="flex h-screen w-full bg-background">
+    <div className={`flex h-screen w-full bg-background ${className}`}>
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header title={title} subtitle={subtitle} />

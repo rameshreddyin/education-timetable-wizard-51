@@ -16,7 +16,7 @@ export default function Layout({ children, title, subtitle, className }: LayoutP
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header title={title} subtitle={subtitle} />
-        <main className="flex-1 overflow-y-auto p-6 animate-fade-in">
+        <main className="flex-1 overflow-y-auto p-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
           {children}
         </main>
       </div>

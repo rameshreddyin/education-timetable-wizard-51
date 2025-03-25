@@ -18,6 +18,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 type Subject = {
   id: string;
@@ -74,6 +76,7 @@ type TeacherAssignment = {
   [teacherName: string]: {
     assigned: number;
     maxLoad: number;
+    subjectAssignments: {[subjectName: string]: number};
     dayLoad: {[day: string]: number};
     consecutiveClasses: {[day: string]: number};
   };
@@ -98,6 +101,10 @@ export default function TimetableGenerator() {
   const [selectedDay, setSelectedDay] = useState<string>('');
   const [selectedPeriod, setSelectedPeriod] = useState<string>('');
   const [selectedSubject, setSelectedSubject] = useState<string>('');
+  
+  const [editTeacherDialogOpen, setEditTeacherDialogOpen] = useState(false);
+  const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
+  const [editedClassesPerWeek, setEditedClassesPerWeek] = useState<number>(0);
   
   // Track subject distribution and teacher assignments for optimized timetable generation
   const [subjectDistribution, setSubjectDistribution] = useState<SubjectDistribution>({});
@@ -162,15 +169,21 @@ export default function TimetableGenerator() {
     teachersList.forEach(teacher => {
       const dayLoad: {[key: string]: number} = {};
       const consecutiveClasses: {[key: string]: number} = {};
+      const subjectAssignments: {[subjectName: string]: number} = {};
       
       weekDays.forEach(day => {
         dayLoad[day] = 0;
         consecutiveClasses[day] = 0;
       });
       
+      teacher.subjects.forEach(subject => {
+        subjectAssignments[subject] = 0;
+      });
+      
       assignments[teacher.name] = {
         assigned: 0,
         maxLoad: teacher.classesPerWeek,
+        subjectAssignments,
         dayLoad,
         consecutiveClasses
       };
@@ -225,22 +238,34 @@ export default function TimetableGenerator() {
     });
   };
   
-  const updateTeacherAssignments = (teacher: string, day: string, periodIndex: number, isAdding: boolean) => {
+  const updateTeacherAssignments = (teacher: string, subject: string, day: string, periodIndex: number, isAdding: boolean) => {
     setTeacherAssignments(prev => {
+      if (!prev[teacher]) return prev;
+      
       const updated = {...prev};
       
       if (isAdding) {
         // Increment assigned count
         updated[teacher].assigned += 1;
         
+        // Increment subject assignments
+        if (updated[teacher].subjectAssignments[subject] !== undefined) {
+          updated[teacher].subjectAssignments[subject] += 1;
+        }
+        
         // Increment day load
         updated[teacher].dayLoad[day] += 1;
         
-        // Check for consecutive classes and update if needed
+        // Update consecutive classes
         updated[teacher].consecutiveClasses[day] = periodIndex;
       } else {
         // Decrement assigned count
         updated[teacher].assigned = Math.max(0, updated[teacher].assigned - 1);
+        
+        // Decrement subject assignments
+        if (updated[teacher].subjectAssignments[subject] !== undefined) {
+          updated[teacher].subjectAssignments[subject] = Math.max(0, updated[teacher].subjectAssignments[subject] - 1);
+        }
         
         // Decrement day load
         updated[teacher].dayLoad[day] = Math.max(0, updated[teacher].dayLoad[day] - 1);
@@ -250,245 +275,230 @@ export default function TimetableGenerator() {
     });
   };
   
+  const handleEditTeacher = (teacher: Teacher) => {
+    setSelectedTeacher(teacher);
+    setEditedClassesPerWeek(teacher.classesPerWeek);
+    setEditTeacherDialogOpen(true);
+  };
+  
+  const handleSaveTeacherEdit = () => {
+    if (!selectedTeacher) return;
+    
+    const updatedTeachers = teachers.map(teacher => 
+      teacher.id === selectedTeacher.id 
+        ? { ...teacher, classesPerWeek: editedClassesPerWeek }
+        : teacher
+    );
+    
+    setTeachers(updatedTeachers);
+    sessionStorage.setItem('teachers', JSON.stringify(updatedTeachers));
+    
+    // Update teacher assignments
+    const updatedAssignments = { ...teacherAssignments };
+    if (updatedAssignments[selectedTeacher.name]) {
+      updatedAssignments[selectedTeacher.name].maxLoad = editedClassesPerWeek;
+      setTeacherAssignments(updatedAssignments);
+    }
+    
+    setEditTeacherDialogOpen(false);
+    
+    toast({
+      title: "Teacher Updated",
+      description: `Maximum classes per week for ${selectedTeacher.name} updated to ${editedClassesPerWeek}.`,
+    });
+  };
+  
   // Advanced timetable generation algorithm
   const handleGenerateTimetable = () => {
+    // Reset the timetable
+    initializeTimetable();
     const newTimetable = { ...timetable };
-    const regularPeriods = periods.filter(p => p.type === 'Regular')
-      .sort((a, b) => a.startTime.localeCompare(b.startTime));
     
     // Reset tracking
     initializeSubjectDistribution(subjects);
     initializeTeacherAssignments(teachers);
     
-    // Clear existing assignments
-    weekDays.forEach(day => {
-      Object.keys(newTimetable[day]).forEach(periodId => {
-        newTimetable[day][periodId] = {
-          periodId,
-          subject: null,
-          teacher: null
-        };
-      });
+    // Get all regular periods sorted by time
+    const regularPeriods = periods
+      .filter(p => p.type === 'Regular')
+      .sort((a, b) => a.startTime.localeCompare(b.startTime))
+      .map(p => p.id);
+      
+    // Calculate total required classes per subject
+    const totalRequiredClasses = subjects.reduce((total, subject) => total + subject.classesPerWeek, 0);
+    console.log(`Total required classes: ${totalRequiredClasses}`);
+    
+    // First, create a priority queue for subjects based on type and classes per week
+    const subjectPriorities = [...subjects].sort((a, b) => {
+      // First sort by type (Main > Secondary > Elective)
+      const typeWeight = {
+        'Main': 3,
+        'Secondary': 2,
+        'Elective': 1
+      };
+      
+      const typeComparison = typeWeight[b.type] - typeWeight[a.type];
+      if (typeComparison !== 0) return typeComparison;
+      
+      // Then by classes per week (higher first)
+      return b.classesPerWeek - a.classesPerWeek;
     });
     
-    // First pass: Assign main subjects with optimal distribution
-    // We'll go day by day to ensure even distribution
-    weekDays.forEach(day => {
-      const dayPeriods = regularPeriods.map(p => p.id);
-      const morningPeriods = dayPeriods.slice(0, Math.ceil(dayPeriods.length / 2));
-      const afternoonPeriods = dayPeriods.slice(Math.ceil(dayPeriods.length / 2));
+    // For each subject, distribute classes across the week
+    subjectPriorities.forEach(subject => {
+      let assignedClasses = 0;
+      const targetClasses = subject.classesPerWeek;
       
-      // First assign main subjects to morning periods
-      morningPeriods.forEach((periodId, periodIndex) => {
-        // Find best subject for this slot based on priority, required classes, and days since last assigned
-        const eligibleSubjects = subjects
-          .filter(s => {
-            const subjectData = subjectDistribution[s.name];
-            return subjectData.assigned < subjectData.required;
-          })
-          .sort((a, b) => {
-            const aData = subjectDistribution[a.name];
-            const bData = subjectDistribution[b.name];
-            
-            // Calculate priority score based on multiple factors
-            const aScore = (aData.weight * 10) + 
-                           (aData.daysSinceLastAssigned[day] * 5) + 
-                           ((aData.required - aData.assigned) / aData.required * 20);
-            
-            const bScore = (bData.weight * 10) + 
-                           (bData.daysSinceLastAssigned[day] * 5) + 
-                           ((bData.required - bData.assigned) / bData.required * 20);
-            
-            return bScore - aScore; // Higher score first
-          });
-        
-        if (eligibleSubjects.length > 0) {
-          const subject = eligibleSubjects[0];
-          
-          // Find best teacher for this subject and time slot
-          const eligibleTeachers = teachers
-            .filter(t => {
-              const teacherData = teacherAssignments[t.name];
-              // Check subject qualification
-              if (!t.subjects.includes(subject.name)) return false;
-              
-              // Check availability
-              const isMorning = periodIndex < Math.ceil(dayPeriods.length / 2);
-              if (isMorning && !t.availability[day]?.morning) return false;
-              if (!isMorning && !t.availability[day]?.afternoon) return false;
-              
-              // Check workload
-              if (teacherData.assigned >= teacherData.maxLoad) return false;
-              if (teacherData.dayLoad[day] >= 4) return false; // Max 4 classes per day
-              
-              return true;
-            })
-            .sort((a, b) => {
-              const aData = teacherAssignments[a.name];
-              const bData = teacherAssignments[b.name];
-              
-              // Calculate teacher score based on workload balance
-              const aScore = ((aData.maxLoad - aData.assigned) / aData.maxLoad * 10) - 
-                             (aData.dayLoad[day] * 2);
-              
-              const bScore = ((bData.maxLoad - bData.assigned) / bData.maxLoad * 10) - 
-                             (bData.dayLoad[day] * 2);
-              
-              return bScore - aScore; // Higher score first
-            });
-          
-          if (eligibleTeachers.length > 0) {
-            const teacher = eligibleTeachers[0];
-            
-            // Assign the subject and teacher
-            newTimetable[day][periodId] = {
-              periodId,
-              subject: subject.name,
-              teacher: teacher.name
-            };
-            
-            // Update tracking
-            updateSubjectDistribution(subject.name, day, true);
-            updateTeacherAssignments(teacher.name, day, periodIndex, true);
-          }
-        }
-      });
-      
-      // Then assign remaining subjects to afternoon periods
-      afternoonPeriods.forEach((periodId, periodIndex) => {
-        const actualPeriodIndex = periodIndex + morningPeriods.length;
-        
-        // Skip if already assigned
-        if (newTimetable[day][periodId].subject) return;
-        
-        // Find best subject with similar logic as before
-        const eligibleSubjects = subjects
-          .filter(s => {
-            const subjectData = subjectDistribution[s.name];
-            return subjectData.assigned < subjectData.required;
-          })
-          .sort((a, b) => {
-            const aData = subjectDistribution[a.name];
-            const bData = subjectDistribution[b.name];
-            
-            // Prioritize subjects that need to be allocated more urgently
-            const aScore = ((aData.required - aData.assigned) / aData.required * 20) + 
-                           (aData.daysSinceLastAssigned[day] * 5);
-            
-            const bScore = ((bData.required - bData.assigned) / bData.required * 20) + 
-                           (bData.daysSinceLastAssigned[day] * 5);
-            
-            return bScore - aScore;
-          });
-        
-        if (eligibleSubjects.length > 0) {
-          const subject = eligibleSubjects[0];
-          
-          // Find suitable teacher with similar logic as before
-          const eligibleTeachers = teachers
-            .filter(t => {
-              const teacherData = teacherAssignments[t.name];
-              if (!t.subjects.includes(subject.name)) return false;
-              if (!t.availability[day]?.afternoon) return false;
-              if (teacherData.assigned >= teacherData.maxLoad) return false;
-              if (teacherData.dayLoad[day] >= 4) return false;
-              return true;
-            })
-            .sort((a, b) => {
-              const aData = teacherAssignments[a.name];
-              const bData = teacherAssignments[b.name];
-              
-              const aScore = ((aData.maxLoad - aData.assigned) / aData.maxLoad * 10) - 
-                             (aData.dayLoad[day] * 2);
-              
-              const bScore = ((bData.maxLoad - bData.assigned) / bData.maxLoad * 10) - 
-                             (bData.dayLoad[day] * 2);
-              
-              return bScore - aScore;
-            });
-          
-          if (eligibleTeachers.length > 0) {
-            const teacher = eligibleTeachers[0];
-            
-            newTimetable[day][periodId] = {
-              periodId,
-              subject: subject.name,
-              teacher: teacher.name
-            };
-            
-            updateSubjectDistribution(subject.name, day, true);
-            updateTeacherAssignments(teacher.name, day, actualPeriodIndex, true);
-          }
-        }
-      });
-    });
-    
-    // Second pass: Fill any remaining slots
-    let iterations = 0;
-    let filledSlots = true;
-    
-    // Continue trying to fill slots until we can't fill any more or reach max iterations
-    while (filledSlots && iterations < 3) {
-      filledSlots = false;
-      iterations++;
-      
+      // Track which days we've already assigned this subject to
+      const assignedDays: Record<string, number> = {};
       weekDays.forEach(day => {
-        Object.keys(newTimetable[day]).forEach((periodId, periodIndex) => {
-          if (!newTimetable[day][periodId].subject) {
-            // Get remaining subjects that need more classes
-            const remainingSubjects = subjects.filter(s => {
-              const data = subjectDistribution[s.name];
-              return data.assigned < data.required;
-            });
+        assignedDays[day] = 0;
+      });
+      
+      // Try to distribute evenly across days first
+      while (assignedClasses < targetClasses) {
+        // Find the day with the fewest assignments for this subject
+        const dayWithFewestAssignments = weekDays.sort((a, b) => assignedDays[a] - assignedDays[b])[0];
+        
+        // Find available teachers for this subject
+        const eligibleTeachers = teachers.filter(teacher => {
+          return teacher.subjects.includes(subject.name) &&
+                 teacherAssignments[teacher.name].assigned < teacherAssignments[teacher.name].maxLoad &&
+                 teacherAssignments[teacher.name].dayLoad[dayWithFewestAssignments] < 3; // Limit to 3 classes per day
+        });
+        
+        if (eligibleTeachers.length === 0) {
+          console.log(`No eligible teachers for ${subject.name} on ${dayWithFewestAssignments}`);
+          break; // No teachers available, can't assign more classes
+        }
+        
+        // Sort teachers by workload (least busy first)
+        eligibleTeachers.sort((a, b) => {
+          return teacherAssignments[a.name].assigned - teacherAssignments[b.name].assigned;
+        });
+        
+        const selectedTeacher = eligibleTeachers[0];
+        
+        // Find an available slot on this day
+        const availableSlots = regularPeriods.filter(periodId => {
+          return !newTimetable[dayWithFewestAssignments][periodId].subject;
+        });
+        
+        if (availableSlots.length === 0) {
+          console.log(`No available slots on ${dayWithFewestAssignments}`);
+          // Mark this day as fully booked for this iteration
+          assignedDays[dayWithFewestAssignments] = 999;
+          continue;
+        }
+        
+        // Pick first available slot (morning first)
+        const selectedSlot = availableSlots[0];
+        
+        // Assign the subject and teacher
+        newTimetable[dayWithFewestAssignments][selectedSlot] = {
+          periodId: selectedSlot,
+          subject: subject.name,
+          teacher: selectedTeacher.name
+        };
+        
+        // Update tracking
+        updateSubjectDistribution(subject.name, dayWithFewestAssignments, true);
+        updateTeacherAssignments(
+          selectedTeacher.name, 
+          subject.name,
+          dayWithFewestAssignments, 
+          regularPeriods.indexOf(selectedSlot), 
+          true
+        );
+        
+        // Update assigned count
+        assignedClasses++;
+        assignedDays[dayWithFewestAssignments]++;
+      }
+    });
+    
+    // Second pass: Fill any remaining slots with subjects that still need assignments
+    let remainingSubjects = subjects.filter(subject => {
+      return subjectDistribution[subject.name].assigned < subject.classesPerWeek;
+    });
+    
+    if (remainingSubjects.length > 0) {
+      console.log("Remaining subjects that need assignments:", remainingSubjects.map(s => s.name));
+      
+      // Try to assign remaining classes
+      weekDays.forEach(day => {
+        regularPeriods.forEach(periodId => {
+          // Skip if slot is already filled
+          if (newTimetable[day][periodId].subject) return;
+          
+          // Update remaining subjects that still need assignments
+          remainingSubjects = subjects.filter(subject => {
+            return subjectDistribution[subject.name].assigned < subject.classesPerWeek;
+          });
+          
+          if (remainingSubjects.length === 0) return;
+          
+          // Sort by most urgent (highest percentage of classes still unassigned)
+          remainingSubjects.sort((a, b) => {
+            const aAssigned = subjectDistribution[a.name].assigned;
+            const aRequired = a.classesPerWeek;
+            const aPercentComplete = aAssigned / aRequired;
             
-            if (remainingSubjects.length > 0) {
-              // Sort by most urgent to allocate
-              remainingSubjects.sort((a, b) => {
-                const aData = subjectDistribution[a.name];
-                const bData = subjectDistribution[b.name];
-                
-                const aRemaining = aData.required - aData.assigned;
-                const bRemaining = bData.required - bData.assigned;
-                
-                return bRemaining - aRemaining;
-              });
-              
-              const subject = remainingSubjects[0];
-              
-              // Find available teacher
-              const isMorningPeriod = periodIndex < Math.ceil(Object.keys(newTimetable[day]).length / 2);
-              const availableTeachers = teachers.filter(t => {
-                const teacherData = teacherAssignments[t.name];
-                if (!t.subjects.includes(subject.name)) return false;
-                if (isMorningPeriod && !t.availability[day]?.morning) return false;
-                if (!isMorningPeriod && !t.availability[day]?.afternoon) return false;
-                if (teacherData.assigned >= teacherData.maxLoad) return false;
-                if (teacherData.dayLoad[day] >= 4) return false;
-                
-                return true;
-              });
-              
-              if (availableTeachers.length > 0) {
-                // Sort by least assigned
-                availableTeachers.sort((a, b) => {
-                  return teacherAssignments[a.name].assigned - teacherAssignments[b.name].assigned;
-                });
-                
-                const teacher = availableTeachers[0];
-                
-                newTimetable[day][periodId] = {
-                  periodId,
-                  subject: subject.name,
-                  teacher: teacher.name
-                };
-                
-                updateSubjectDistribution(subject.name, day, true);
-                updateTeacherAssignments(teacher.name, day, periodIndex, true);
-                
-                filledSlots = true;
-              }
-            }
-          }
+            const bAssigned = subjectDistribution[b.name].assigned;
+            const bRequired = b.classesPerWeek;
+            const bPercentComplete = bAssigned / bRequired;
+            
+            return aPercentComplete - bPercentComplete;
+          });
+          
+          const subjectToAssign = remainingSubjects[0];
+          
+          // Find teachers for this subject with availability on this day
+          const availableTeachers = teachers.filter(teacher => {
+            // Check if teacher teaches this subject
+            if (!teacher.subjects.includes(subjectToAssign.name)) return false;
+            
+            // Check if teacher has capacity left
+            if (teacherAssignments[teacher.name].assigned >= teacherAssignments[teacher.name].maxLoad) return false;
+            
+            // Check if teacher already has too many classes on this day
+            if (teacherAssignments[teacher.name].dayLoad[day] >= 3) return false;
+            
+            // Check if teacher is available at this time (morning/afternoon)
+            const periodIndex = regularPeriods.indexOf(periodId);
+            const isMorning = periodIndex < Math.floor(regularPeriods.length / 2);
+            
+            if (isMorning && !teacher.availability[day]?.morning) return false;
+            if (!isMorning && !teacher.availability[day]?.afternoon) return false;
+            
+            return true;
+          });
+          
+          if (availableTeachers.length === 0) return; // No teachers available for this subject
+          
+          // Choose the teacher with the fewest assignments
+          availableTeachers.sort((a, b) => {
+            return teacherAssignments[a.name].assigned - teacherAssignments[b.name].assigned;
+          });
+          
+          const selectedTeacher = availableTeachers[0];
+          
+          // Assign the subject and teacher
+          newTimetable[day][periodId] = {
+            periodId,
+            subject: subjectToAssign.name,
+            teacher: selectedTeacher.name
+          };
+          
+          // Update tracking
+          updateSubjectDistribution(subjectToAssign.name, day, true);
+          updateTeacherAssignments(
+            selectedTeacher.name, 
+            subjectToAssign.name,
+            day, 
+            regularPeriods.indexOf(periodId), 
+            true
+          );
         });
       });
     }
@@ -496,10 +506,23 @@ export default function TimetableGenerator() {
     setTimetable(newTimetable);
     setIsGenerated(true);
     
-    toast({
-      title: "Timetable Generated",
-      description: "Timetable has been generated with optimal distribution of subjects and teachers.",
+    // Check if all subject requirements were met
+    const unfulfilledSubjects = subjects.filter(subject => {
+      return subjectDistribution[subject.name].assigned < subject.classesPerWeek;
     });
+    
+    if (unfulfilledSubjects.length > 0) {
+      toast({
+        title: "Timetable Generated With Warnings",
+        description: `Could not fulfill all requirements for ${unfulfilledSubjects.length} subjects. Consider adjusting teacher availability or class requirements.`,
+        variant: "destructive"
+      });
+    } else {
+      toast({
+        title: "Timetable Generated Successfully",
+        description: "Timetable has been generated with optimal distribution of subjects and teachers.",
+      });
+    }
   };
   
   const handleSlotClick = (day: string, periodId: string) => {
@@ -527,7 +550,7 @@ export default function TimetableGenerator() {
         updateSubjectDistribution(currentSlot.subject, selectedDay, false);
         if (currentSlot.teacher) {
           const periodIndex = periods.findIndex(p => p.id === selectedPeriod);
-          updateTeacherAssignments(currentSlot.teacher, selectedDay, periodIndex, false);
+          updateTeacherAssignments(currentSlot.teacher, currentSlot.subject, selectedDay, periodIndex, false);
         }
       }
       
@@ -549,7 +572,7 @@ export default function TimetableGenerator() {
           // Update tracking
           updateSubjectDistribution(selectedSubject, selectedDay, true);
           const periodIndex = periods.findIndex(p => p.id === selectedPeriod);
-          updateTeacherAssignments(bestTeacher, selectedDay, periodIndex, true);
+          updateTeacherAssignments(bestTeacher, selectedSubject, selectedDay, periodIndex, true);
         }
       }
       
@@ -728,6 +751,56 @@ export default function TimetableGenerator() {
           </CardHeader>
         </Card>
         
+        {/* Teacher Workload Management Card */}
+        <Card className="w-full mb-6">
+          <CardHeader>
+            <CardTitle>Teacher Workload Management</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Teacher Name</TableHead>
+                    <TableHead>Subjects</TableHead>
+                    <TableHead className="text-center">Max Classes Per Week</TableHead>
+                    <TableHead className="text-center">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {teachers.map(teacher => (
+                    <TableRow key={teacher.id}>
+                      <TableCell className="font-medium">{teacher.name}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {teacher.subjects.map(subject => (
+                            <span 
+                              key={subject} 
+                              className="px-2 py-0.5 bg-muted rounded-full text-xs"
+                            >
+                              {subject}
+                            </span>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center">{teacher.classesPerWeek}</TableCell>
+                      <TableCell className="text-center">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => handleEditTeacher(teacher)}
+                        >
+                          Edit Workload
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+        
         <div ref={printRef}>
           <Card>
             <CardContent className="pt-6">
@@ -864,6 +937,76 @@ export default function TimetableGenerator() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* Edit Teacher Dialog */}
+      <Dialog open={editTeacherDialogOpen} onOpenChange={setEditTeacherDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Teacher Workload</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="teacherName" className="text-right">
+                Teacher Name
+              </Label>
+              <div className="col-span-3 font-medium">
+                {selectedTeacher?.name}
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="maxClasses" className="text-right">
+                Max Classes Per Week
+              </Label>
+              <Input
+                id="maxClasses"
+                type="number"
+                min="1"
+                max="30"
+                className="col-span-3"
+                value={editedClassesPerWeek}
+                onChange={(e) => setEditedClassesPerWeek(parseInt(e.target.value) || 0)}
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <div className="text-right text-sm font-medium">
+                Subjects
+              </div>
+              <div className="col-span-3">
+                <div className="flex flex-wrap gap-1">
+                  {selectedTeacher?.subjects.map(subject => (
+                    <span 
+                      key={subject} 
+                      className="px-2 py-0.5 bg-muted rounded-full text-xs"
+                    >
+                      {subject}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            
+            <div className="col-span-4">
+              <div className="bg-muted/20 p-3 rounded-md text-sm">
+                <p className="font-medium text-foreground">Recommended Workload:</p>
+                <p className="text-muted-foreground mt-1">
+                  Based on subjects taught and class requirements, 
+                  {selectedTeacher && calculateRecommendedWorkload(selectedTeacher)} classes per week is recommended.
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTeacherDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveTeacherEdit}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
@@ -880,4 +1023,57 @@ function formatTime(timeString: string): string {
   } catch (error) {
     return timeString; // Return original if parsing fails
   }
+}
+
+// Helper function to calculate recommended workload for a teacher
+function calculateRecommendedWorkload(teacher: Teacher): string {
+  // Get subjects from session storage
+  const storedSubjects = sessionStorage.getItem('subjects');
+  if (!storedSubjects) return "unknown";
+  
+  const subjects = JSON.parse(storedSubjects) as Subject[];
+  
+  // Calculate total classes needed for subjects this teacher teaches
+  let totalClassesNeeded = 0;
+  const teacherSubjects = teacher.subjects;
+  
+  teacherSubjects.forEach(subjectName => {
+    const subject = subjects.find(s => s.name === subjectName);
+    if (subject) {
+      totalClassesNeeded += subject.classesPerWeek;
+    }
+  });
+  
+  // Calculate how many teachers teach each of these subjects
+  const teachersPerSubject: Record<string, number> = {};
+  
+  // Get teachers from session storage
+  const storedTeachers = sessionStorage.getItem('teachers');
+  if (storedTeachers) {
+    const allTeachers = JSON.parse(storedTeachers) as Teacher[];
+    
+    teacherSubjects.forEach(subjectName => {
+      teachersPerSubject[subjectName] = allTeachers.filter(t => 
+        t.subjects.includes(subjectName)
+      ).length;
+    });
+  }
+  
+  // Calculate recommended workload based on fair distribution
+  let recommendedWorkload = 0;
+  
+  teacherSubjects.forEach(subjectName => {
+    const subject = subjects.find(s => s.name === subjectName);
+    if (subject && teachersPerSubject[subjectName]) {
+      // Fair share of classes for this subject
+      const fairShare = Math.ceil(subject.classesPerWeek / teachersPerSubject[subjectName]);
+      recommendedWorkload += fairShare;
+    }
+  });
+  
+  // Provide a range for flexibility
+  const minRecommended = Math.max(5, recommendedWorkload - 2);
+  const maxRecommended = recommendedWorkload + 2;
+  
+  return `${minRecommended}-${maxRecommended}`;
 }

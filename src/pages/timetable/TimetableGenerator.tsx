@@ -931,3 +931,398 @@ export default function TimetableGenerator() {
     <Layout 
       title="Timetable Generator" 
       subtitle="Step 5 of 5 - Create and review timetable"
+      className="max-w-full"
+    >
+      <div className="grid gap-6">
+        {/* Resources Status Card */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <CardTitle>Resource Status</CardTitle>
+              <div className="flex items-center gap-3">
+                <Select 
+                  value={selectedClass + '-' + selectedSection} 
+                  disabled
+                >
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Select class" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={selectedClass + '-' + selectedSection}>
+                      {selectedClass} - {selectedSection}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Left Column - Resource Alerts */}
+              <div>
+                {resourceAlerts.length > 0 ? (
+                  <div className="space-y-4">
+                    {resourceAlerts.map((alert, index) => (
+                      <Alert key={index} variant={alert.type === 'error' ? 'destructive' : alert.type === 'info' ? 'default' : undefined}>
+                        <AlertTitle className="flex items-center gap-2">
+                          {alert.title}
+                        </AlertTitle>
+                        <AlertDescription>
+                          {alert.description}
+                        </AlertDescription>
+                      </Alert>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex h-full items-center justify-center text-center p-6">
+                    <div>
+                      <CheckCircle className="mx-auto h-12 w-12 text-green-500 mb-4" />
+                      <h3 className="text-lg font-semibold">All Resources Ready</h3>
+                      <p className="text-muted-foreground">
+                        You have all resources needed to generate a timetable.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Right Column - Stats */}
+              <div className="space-y-4">
+                {/* Allocation Stats */}
+                <div className="border rounded-lg p-4 space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-semibold">Overall Allocation</h3>
+                    <span className="text-sm">{getAllocationPercentage()}% Complete</span>
+                  </div>
+                  <Progress value={getAllocationPercentage()} />
+                  <div className="grid grid-cols-2 gap-4 mt-4 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Required Classes:</span> 
+                      <span className="font-medium">{getTotalRequiredClasses()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Allocated Classes:</span> 
+                      <span className="font-medium">{getTotalAllocatedClasses()}</span>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Subject Distribution Cards */}
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
+                  <h3 className="font-semibold">Subject Allocation Status</h3>
+                  {subjects.map(subject => {
+                    const allocated = subjectDistribution[subject.name]?.assigned || 0;
+                    const required = subject.classesPerWeek;
+                    const percentage = required > 0 ? Math.round((allocated / required) * 100) : 0;
+                    const teachersList = getTeachersForSubject(subject.name);
+                    
+                    // Determine status for styling
+                    let statusColor = "bg-green-100 text-green-800";
+                    if (isSubjectUnderAllocated(subject.name)) {
+                      statusColor = "bg-amber-100 text-amber-800";
+                    } else if (isSubjectOverAllocated(subject.name)) {
+                      statusColor = "bg-red-100 text-red-800";
+                    }
+                    
+                    return (
+                      <div key={subject.id} className="border rounded-md p-3 flex flex-col space-y-2">
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{subject.name}</span>
+                            <Badge variant={
+                              subject.type === 'Main' ? 'default' : 
+                              subject.type === 'Secondary' ? 'secondary' : 'outline'
+                            }>
+                              {subject.type}
+                            </Badge>
+                          </div>
+                          <Badge className={statusColor}>
+                            {allocated}/{required} Classes
+                          </Badge>
+                        </div>
+                        
+                        <div className="space-y-1 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Teachers: </span>
+                            <span className="font-medium">
+                              {teachersList.length > 0 ? teachersList.join(', ') : 'None assigned'}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <Progress value={percentage} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+          <CardFooter className="border-t pt-4 flex justify-center md:justify-between flex-wrap gap-2">
+            <Button variant="outline" onClick={() => navigate('/timetable-wizard/school-timings')}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to School Timings
+            </Button>
+            <div className="flex gap-2">
+              <Button 
+                onClick={handleGenerateTimetable}
+                disabled={resourceAlerts.some(alert => alert.type === 'error')}
+              >
+                <Wand2 className="mr-2 h-4 w-4" />
+                Auto-Generate Timetable
+              </Button>
+            </div>
+          </CardFooter>
+        </Card>
+        
+        {/* Timetable */}
+        {isGenerated && (
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <CardTitle>Generated Class Timetable</CardTitle>
+                <div className="flex gap-2">
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button size="sm" variant="outline" onClick={handlePrintTimetable}>
+                          <Printer className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Print Timetable</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto" ref={printRef}>
+                <Table className="border">
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="w-[120px] text-left">Period</TableHead>
+                      <TableHead className="text-left">Time</TableHead>
+                      {weekDays.map(day => (
+                        <TableHead key={day} className="text-center">{day}</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {getAllPeriods().map(period => (
+                      <TableRow key={period.id}>
+                        <TableCell className="font-medium">{period.name}</TableCell>
+                        <TableCell>
+                          {period.startTime} - {period.endTime}
+                        </TableCell>
+                        
+                        {weekDays.map(day => {
+                          // For break or lunch periods
+                          if (period.type !== 'Regular') {
+                            return (
+                              <TableCell key={day} colSpan={1} className="break-cell text-center">
+                                {period.type}
+                              </TableCell>
+                            );
+                          }
+                          
+                          // For regular periods
+                          const slot = timetable[day]?.[period.id];
+                          const subject = slot?.subject;
+                          const teacher = slot?.teacher;
+                          const borderClass = subject ? (
+                            isSubjectOverAllocated(subject) ? "border-red-500" :
+                            isSubjectUnderAllocated(subject) ? "border-yellow-500" : "border-green-500"
+                          ) : "";
+                          
+                          const subjectInfo = subjects.find(s => s.name === subject);
+                          const subjectTypeClass = subjectInfo?.type === 'Main' 
+                            ? "bg-blue-50" 
+                            : subjectInfo?.type === 'Secondary' 
+                              ? "bg-purple-50" 
+                              : "bg-gray-50";
+                          
+                          return (
+                            <TableCell 
+                              key={day} 
+                              className={`text-center p-0 ${subject ? `${subjectTypeClass} ${borderClass} border-l-4` : ""}`}
+                            >
+                              <button
+                                onClick={() => handleSlotClick(day, period.id)}
+                                className="w-full h-full p-2"
+                              >
+                                {subject ? (
+                                  <div className="flex flex-col">
+                                    <span className="font-medium">{subject}</span>
+                                    {teacher && (
+                                      <span className="text-xs text-gray-600">{teacher}</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </button>
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+            <CardFooter className="border-t pt-4">
+              <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-4 bg-blue-50 border-l-4 border-green-500"></div>
+                  <span className="text-sm">Main Subject</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-4 bg-purple-50 border-l-4 border-green-500"></div>
+                  <span className="text-sm">Secondary Subject</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-4 bg-gray-50 border-l-4 border-green-500"></div>
+                  <span className="text-sm">Elective Subject</span>
+                </div>
+              </div>
+            </CardFooter>
+          </Card>
+        )}
+        
+        {/* Teacher Management */}
+        {isGenerated && teachers.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Teacher Workload</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {teachers.map(teacher => (
+                  <div 
+                    key={teacher.id} 
+                    className="border rounded-md p-4 hover:border-primary cursor-pointer transition-all"
+                    onClick={() => handleEditTeacher(teacher)}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="font-medium">{teacher.name}</h3>
+                      <Badge variant="outline">
+                        {teacherAssignments[teacher.name]?.assigned || 0}/{teacher.classesPerWeek} Classes
+                      </Badge>
+                    </div>
+                    <Progress value={getTeacherWorkloadPercentage(teacher.name)} className="mb-2" />
+                    <div className="text-sm text-muted-foreground">
+                      <p>Subjects: {teacher.subjects.join(', ')}</p>
+                      <div className="mt-1 grid grid-cols-3 gap-1">
+                        {weekDays.map(day => (
+                          <div key={day} className="text-xs">
+                            <span className="font-medium">{day.substring(0, 3)}</span>: {teacherAssignments[teacher.name]?.dayLoad[day] || 0}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        
+        {/* Slot Assignment Dialog */}
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Assign Subject</DialogTitle>
+              <DialogDescription>
+                Select a subject to assign to this slot.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="subject">Subject</Label>
+                <Select value={selectedSubject} onValueChange={setSelectedSubject}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a subject" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">None (Clear Slot)</SelectItem>
+                    {subjects.map(subject => (
+                      <SelectItem key={subject.id} value={subject.name}>
+                        {subject.name} - {subject.type}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {selectedSubject && (
+                <div className="grid gap-2">
+                  <Label>Available Teachers</Label>
+                  <div className="border rounded-md p-2 text-sm">
+                    {getEligibleTeachers(selectedSubject).length > 0 ? (
+                      getEligibleTeachers(selectedSubject).map(teacher => (
+                        <div key={teacher.id} className="flex justify-between items-center py-1">
+                          <span>{teacher.name}</span>
+                          <Badge variant="outline">
+                            {teacherAssignments[teacher.name]?.assigned || 0}/{teacher.classesPerWeek} Classes
+                          </Badge>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-muted-foreground">No teachers available for this subject</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleAssignSlot}>Assign</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        
+        {/* Edit Teacher Dialog */}
+        <Dialog open={editTeacherDialogOpen} onOpenChange={setEditTeacherDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Teacher</DialogTitle>
+              <DialogDescription>
+                Adjust teacher settings and workload.
+              </DialogDescription>
+            </DialogHeader>
+            {selectedTeacher && (
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="name">Name</Label>
+                  <Input id="name" value={selectedTeacher.name} disabled />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="subjects">Subjects</Label>
+                  <Input 
+                    id="subjects" 
+                    value={selectedTeacher.subjects.join(', ')} 
+                    disabled 
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="classesPerWeek">Maximum Classes Per Week</Label>
+                  <Input 
+                    id="classesPerWeek" 
+                    type="number"
+                    min="1"
+                    max="30"
+                    value={editedClassesPerWeek}
+                    onChange={(e) => setEditedClassesPerWeek(parseInt(e.target.value) || 0)}
+                  />
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditTeacherDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleSaveTeacherEdit}>Save Changes</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </Layout>
+  );
+}

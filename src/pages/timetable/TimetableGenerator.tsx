@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import Layout from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
@@ -22,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
 
 type Subject = {
   id: string;
@@ -839,6 +839,31 @@ export default function TimetableGenerator() {
     }, 250);
   };
   
+  // Get teacher names for a subject
+  const getTeachersForSubject = (subjectName: string) => {
+    return teachers
+      .filter(teacher => teacher.subjects.includes(subjectName))
+      .map(teacher => teacher.name);
+  };
+  
+  // Calculate teacher workload percentage
+  const getTeacherWorkloadPercentage = (teacherName: string) => {
+    const teacher = teachers.find(t => t.name === teacherName);
+    if (!teacher) return 0;
+    
+    const assigned = teacherAssignments[teacherName]?.assigned || 0;
+    const maxLoad = teacher.classesPerWeek;
+    
+    return maxLoad > 0 ? Math.round((assigned / maxLoad) * 100) : 0;
+  };
+  
+  // Check if a subject is under-allocated
+  const isSubjectUnderAllocated = (subjectName: string) => {
+    const data = subjectDistribution[subjectName];
+    if (!data) return false;
+    return data.assigned < data.required;
+  };
+  
   return (
     <Layout 
       title="Timetable Generator" 
@@ -927,27 +952,60 @@ export default function TimetableGenerator() {
           </div>
         )}
 
-        {/* Subject Allocation Cards */}
+        {/* Enhanced Subject Allocation Cards with Teacher Information */}
         <Card className="w-full mb-6">
           <CardHeader className="pb-2">
             <CardTitle>Subject Allocation Status</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              {Object.entries(subjectDistribution).map(([subjectName, data]) => (
-                <div key={subjectName} className="bg-secondary rounded-md p-3">
-                  <div className="flex justify-between mb-1">
-                    <span className="font-medium">{subjectName}</span>
-                    <span className="text-sm">
-                      {data.assigned}/{data.required} classes
-                    </span>
+              {Object.entries(subjectDistribution).map(([subjectName, data]) => {
+                const subjectTeachers = getTeachersForSubject(subjectName);
+                const isUnderAllocated = isSubjectUnderAllocated(subjectName);
+                
+                return (
+                  <div 
+                    key={subjectName} 
+                    className={`bg-secondary rounded-md p-3 border-l-4 ${
+                      isUnderAllocated ? 'border-amber-500' : 'border-green-500'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="font-medium">{subjectName}</span>
+                      <div className="flex items-center gap-1">
+                        <Badge variant={data.assigned >= data.required ? "default" : "outline"}>
+                          {data.assigned}/{data.required}
+                        </Badge>
+                      </div>
+                    </div>
+                    <Progress 
+                      value={data.required > 0 ? (data.assigned / data.required) * 100 : 0} 
+                      className={`h-1.5 ${isUnderAllocated ? 'bg-amber-100' : ''}`}
+                    />
+                    {subjectTeachers.length > 0 ? (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        <span className="block mb-1">Teachers:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {subjectTeachers.slice(0, 3).map((teacher, idx) => (
+                            <Badge key={idx} variant="secondary" className="text-xs">
+                              {teacher}
+                            </Badge>
+                          ))}
+                          {subjectTeachers.length > 3 && (
+                            <Badge variant="secondary" className="text-xs">
+                              +{subjectTeachers.length - 3} more
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        <span className="text-red-500">No teachers assigned</span>
+                      </div>
+                    )}
                   </div>
-                  <Progress 
-                    value={data.required > 0 ? (data.assigned / data.required) * 100 : 0} 
-                    className="h-1.5" 
-                  />
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -1010,16 +1068,16 @@ export default function TimetableGenerator() {
               <Table className="border">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-24">Time / Day</TableHead>
+                    <TableHead className="w-24 bg-muted/50">Time / Day</TableHead>
                     {weekDays.map((day) => (
-                      <TableHead key={day}>{day}</TableHead>
+                      <TableHead key={day} className="bg-muted/50 text-center">{day}</TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {getAllPeriods().map((period) => (
-                    <TableRow key={period.id}>
-                      <TableCell className="font-medium">
+                    <TableRow key={period.id} className={period.type !== 'Regular' ? 'bg-muted/20' : ''}>
+                      <TableCell className="font-medium border-r">
                         <div>{period.name}</div>
                         <div className="text-xs text-muted-foreground">
                           {formatTime(period.startTime)} - {formatTime(period.endTime)}
@@ -1044,16 +1102,34 @@ export default function TimetableGenerator() {
                         const slot = timetable[day]?.[period.id];
                         const hasAssignment = slot && slot.subject;
                         
+                        // Get subject type for styling
+                        const subjectType = hasAssignment 
+                          ? subjects.find(s => s.name === slot.subject)?.type 
+                          : null;
+                        
+                        // Apply different styling based on subject type
+                        const cellStyle = hasAssignment
+                          ? subjectType === 'Main'
+                            ? 'bg-blue-50 border border-blue-100'
+                            : subjectType === 'Secondary'
+                              ? 'bg-purple-50 border border-purple-100'
+                              : 'bg-amber-50 border border-amber-100'
+                          : 'hover:bg-muted/30';
+                        
                         return (
                           <TableCell 
                             key={`${day}-${period.id}`}
-                            className={`cursor-pointer hover:bg-muted/30 ${hasAssignment ? 'bg-secondary/40' : ''}`}
+                            className={`cursor-pointer transition-colors ${cellStyle}`}
                             onClick={() => handleSlotClick(day, period.id)}
                           >
                             {hasAssignment ? (
-                              <div>
+                              <div className="flex flex-col h-full">
                                 <div className="font-medium">{slot.subject}</div>
-                                <div className="text-xs text-muted-foreground">{slot.teacher}</div>
+                                <div className="text-xs">
+                                  {slot.teacher && (
+                                    <span className="text-muted-foreground">{slot.teacher}</span>
+                                  )}
+                                </div>
                               </div>
                             ) : (
                               <div className="flex items-center justify-center h-full text-muted-foreground">

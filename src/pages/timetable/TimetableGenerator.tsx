@@ -11,9 +11,9 @@ import {
   TableRow 
 } from '@/components/ui/table';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { ArrowLeft, Download, Plus, Printer, Wand2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Download, Plus, Printer, Wand2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useToast } from '@/components/ui/use-toast';
+import { useToast } from '@/hooks/use-toast';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -698,10 +698,9 @@ export default function TimetableGenerator() {
       toast({
         title: "Timetable Generated With Warnings",
         description: `Could not fulfill all requirements for ${unfulfilledSubjects.length} subjects. Some slots are intentionally left empty.`,
-        variant: "warning"
+        variant: "destructive"
       });
     } else if (overallocatedSubjects.length > 0) {
-      // FIX: Add warning for over-allocated subjects
       const subjectDetails = overallocatedSubjects.map(subject => {
         const assigned = subjectDistribution[subject.name].assigned;
         const total = subject.classesPerWeek;
@@ -713,7 +712,7 @@ export default function TimetableGenerator() {
       toast({
         title: "Timetable Generated With Warnings",
         description: `Some subjects have been allocated more classes than required. Please review the timetable.`,
-        variant: "warning"
+        variant: "destructive"
       });
     } else {
       toast({
@@ -963,7 +962,7 @@ export default function TimetableGenerator() {
                 {resourceAlerts.length > 0 ? (
                   <div className="space-y-4">
                     {resourceAlerts.map((alert, index) => (
-                      <Alert key={index} variant={alert.type === 'error' ? 'destructive' : alert.type === 'info' ? 'default' : undefined}>
+                      <Alert key={index} variant={alert.type === 'error' ? 'destructive' : undefined}>
                         <AlertTitle className="flex items-center gap-2">
                           {alert.title}
                         </AlertTitle>

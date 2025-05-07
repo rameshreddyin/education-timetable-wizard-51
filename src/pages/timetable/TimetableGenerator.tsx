@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
 
 type Subject = {
   id: string;
@@ -306,6 +307,22 @@ export default function TimetableGenerator() {
       title: "Teacher Updated",
       description: `Maximum classes per week for ${selectedTeacher.name} updated to ${editedClassesPerWeek}.`,
     });
+  };
+  
+  // Calculate total classes required and allocated
+  const getTotalRequiredClasses = () => {
+    return subjects.reduce((total, subject) => total + subject.classesPerWeek, 0);
+  };
+  
+  const getTotalAllocatedClasses = () => {
+    return Object.values(subjectDistribution).reduce((total, subject) => total + subject.assigned, 0);
+  };
+  
+  // Calculate allocation percentage
+  const getAllocationPercentage = () => {
+    const required = getTotalRequiredClasses();
+    const allocated = getTotalAllocatedClasses();
+    return required > 0 ? Math.round((allocated / required) * 100) : 0;
   };
   
   // Advanced timetable generation algorithm
@@ -697,6 +714,101 @@ export default function TimetableGenerator() {
       subtitle="Step 5 of 5 - Create and review timetable"
     >
       <div className="w-full">
+        {/* Dashboard Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex flex-col space-y-1.5">
+                <h3 className="font-semibold text-lg">Subject Statistics</h3>
+                <div className="flex justify-between text-sm">
+                  <span>Total Subjects:</span>
+                  <span className="font-semibold">{subjects.length}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Main Subjects:</span>
+                  <span className="font-semibold">{subjects.filter(s => s.type === 'Main').length}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Secondary Subjects:</span>
+                  <span className="font-semibold">{subjects.filter(s => s.type === 'Secondary').length}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex flex-col space-y-1.5">
+                <h3 className="font-semibold text-lg">Class Requirements</h3>
+                <div className="flex justify-between text-sm">
+                  <span>Required Classes:</span>
+                  <span className="font-semibold">{getTotalRequiredClasses()}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Allocated Classes:</span>
+                  <span className="font-semibold">{getTotalAllocatedClasses()}</span>
+                </div>
+                <div className="flex flex-col gap-1.5 mt-1">
+                  <div className="flex justify-between text-xs">
+                    <span>Completion:</span>
+                    <span>{getAllocationPercentage()}%</span>
+                  </div>
+                  <Progress value={getAllocationPercentage()} className="h-2" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex flex-col space-y-1.5">
+                <h3 className="font-semibold text-lg">Teacher Allocation</h3>
+                <div className="flex justify-between text-sm">
+                  <span>Total Teachers:</span>
+                  <span className="font-semibold">{teachers.length}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Available Periods:</span>
+                  <span className="font-semibold">
+                    {periods.filter(p => p.type === 'Regular').length * weekDays.length}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Classes/Week:</span>
+                  <span className="font-semibold">
+                    {teachers.reduce((total, teacher) => total + teacher.classesPerWeek, 0)}
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Subject Allocation Cards */}
+        <Card className="w-full mb-6">
+          <CardHeader className="pb-2">
+            <CardTitle>Subject Allocation Status</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {Object.entries(subjectDistribution).map(([subjectName, data]) => (
+                <div key={subjectName} className="bg-secondary rounded-md p-3">
+                  <div className="flex justify-between mb-1">
+                    <span className="font-medium">{subjectName}</span>
+                    <span className="text-sm">
+                      {data.assigned}/{data.required} classes
+                    </span>
+                  </div>
+                  <Progress 
+                    value={data.required > 0 ? (data.assigned / data.required) * 100 : 0} 
+                    className="h-1.5" 
+                  />
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="w-full mb-6">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
@@ -725,74 +837,90 @@ export default function TimetableGenerator() {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Generate an optimized timetable considering subject importance, teacher workloads, and pedagogical best practices</p>
+                    <p>Auto-generate optimal timetable</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
               
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button 
-                      variant="outline" 
-                      disabled={!isGenerated}
-                      onClick={handlePrintTimetable}
-                    >
-                      <Printer className="mr-2 h-4 w-4" />
-                      Print
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Print timetable or save as PDF</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              {isGenerated && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="outline"
+                        onClick={handlePrintTimetable}
+                      >
+                        <Printer className="mr-2 h-4 w-4" />
+                        Print Timetable
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Print or download as PDF</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
           </CardHeader>
-        </Card>
-        
-        {/* Teacher Workload Management Card */}
-        <Card className="w-full mb-6">
-          <CardHeader>
-            <CardTitle>Teacher Workload Management</CardTitle>
-          </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
+            <div ref={printRef} className="overflow-x-auto">
+              <Table className="border">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Teacher Name</TableHead>
-                    <TableHead>Subjects</TableHead>
-                    <TableHead className="text-center">Max Classes Per Week</TableHead>
-                    <TableHead className="text-center">Actions</TableHead>
+                    <TableHead className="w-24">Time / Day</TableHead>
+                    {weekDays.map((day) => (
+                      <TableHead key={day}>{day}</TableHead>
+                    ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {teachers.map(teacher => (
-                    <TableRow key={teacher.id}>
-                      <TableCell className="font-medium">{teacher.name}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {teacher.subjects.map(subject => (
-                            <span 
-                              key={subject} 
-                              className="px-2 py-0.5 bg-muted rounded-full text-xs"
-                            >
-                              {subject}
-                            </span>
-                          ))}
+                  {getAllPeriods().map((period) => (
+                    <TableRow key={period.id}>
+                      <TableCell className="font-medium">
+                        <div>{period.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatTime(period.startTime)} - {formatTime(period.endTime)}
                         </div>
                       </TableCell>
-                      <TableCell className="text-center">{teacher.classesPerWeek}</TableCell>
-                      <TableCell className="text-center">
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          onClick={() => handleEditTeacher(teacher)}
-                        >
-                          Edit Workload
-                        </Button>
-                      </TableCell>
+                      
+                      {weekDays.map((day) => {
+                        // For break or lunch periods
+                        if (period.type !== 'Regular') {
+                          return (
+                            <TableCell 
+                              key={`${day}-${period.id}`} 
+                              className="text-center bg-muted/30 italic"
+                              colSpan={1}
+                            >
+                              {period.type}
+                            </TableCell>
+                          );
+                        }
+                        
+                        // For regular periods
+                        const slot = timetable[day]?.[period.id];
+                        const hasAssignment = slot && slot.subject;
+                        
+                        return (
+                          <TableCell 
+                            key={`${day}-${period.id}`}
+                            className={`cursor-pointer hover:bg-muted/30 ${hasAssignment ? 'bg-secondary/40' : ''}`}
+                            onClick={() => handleSlotClick(day, period.id)}
+                          >
+                            {hasAssignment ? (
+                              <div>
+                                <div className="font-medium">{slot.subject}</div>
+                                <div className="text-xs text-muted-foreground">{slot.teacher}</div>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center h-full text-muted-foreground">
+                                <Plus className="h-4 w-4" />
+                                <span className="ml-1">Assign</span>
+                              </div>
+                            )}
+                          </TableCell>
+                        );
+                      })}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -800,97 +928,25 @@ export default function TimetableGenerator() {
             </div>
           </CardContent>
         </Card>
-        
-        <div ref={printRef}>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[120px]">Time</TableHead>
-                      {weekDays.map(day => (
-                        <TableHead key={day}>{day}</TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {getAllPeriods().map((period) => (
-                      <TableRow key={period.id}>
-                        <TableCell className="font-medium">
-                          <div>
-                            <div className="font-mono text-sm">
-                              {formatTime(period.startTime)} - {formatTime(period.endTime)}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {period.name}
-                            </div>
-                          </div>
-                        </TableCell>
-                        
-                        {weekDays.map((day) => {
-                          if (period.type !== 'Regular') {
-                            return (
-                              <TableCell key={day} className="bg-muted/30 text-center">
-                                <div className="text-muted-foreground font-medium">
-                                  {period.type === 'Break' ? 'Short Break' : 'Lunch Break'}
-                                </div>
-                              </TableCell>
-                            );
-                          }
-                          
-                          const timeSlot = timetable[day]?.[period.id];
-                          
-                          return (
-                            <TableCell 
-                              key={day} 
-                              className={`cursor-pointer hover:bg-muted/50 transition-colors ${!timeSlot?.subject ? 'bg-muted/20' : ''}`}
-                              onClick={() => handleSlotClick(day, period.id)}
-                            >
-                              {timeSlot?.subject ? (
-                                <div>
-                                  <div className="font-medium">{timeSlot.subject}</div>
-                                  {timeSlot.teacher && (
-                                    <div className="text-xs text-muted-foreground">
-                                      {timeSlot.teacher}
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <div className="flex justify-center items-center h-full">
-                                  <Plus className="h-4 w-4 text-muted-foreground" />
-                                </div>
-                              )}
-                            </TableCell>
-                          );
-                        })}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
       </div>
       
-      {/* Assignment Dialog */}
+      {/* Edit Timetable Slot Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Assign Subject</DialogTitle>
+            <DialogTitle>Assign Class</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <label htmlFor="subject" className="text-right text-sm font-medium">
-                Subject
-              </label>
-              <Select 
-                value={selectedSubject} 
+            <div>
+              <Label htmlFor="subject" className="mb-2 block">
+                Select Subject
+              </Label>
+              <Select
+                value={selectedSubject}
                 onValueChange={setSelectedSubject}
               >
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Select subject" />
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a subject" />
                 </SelectTrigger>
                 <SelectContent>
                   {subjects.map((subject) => (
@@ -902,36 +958,32 @@ export default function TimetableGenerator() {
               </Select>
             </div>
             
-            {selectedSubject && (
-              <div className="grid grid-cols-4 items-center gap-4">
-                <div className="text-right text-sm font-medium">
-                  Teacher
-                </div>
-                <div className="col-span-3 text-sm">
-                  {getEligibleTeachers(selectedSubject).length > 0 ? (
-                    <div className="p-2 bg-muted/20 rounded">
-                      <p>Teacher will be automatically assigned based on:</p>
-                      <ul className="list-disc pl-5 text-xs text-muted-foreground mt-1">
-                        <li>Current workload balance</li>
-                        <li>Subject specialization</li>
-                        <li>Availability on {selectedDay}</li>
-                      </ul>
-                    </div>
+            <div className="text-sm">
+              <Label className="mb-2 block">Available Teachers</Label>
+              <div className="p-3 border rounded-md">
+                {selectedSubject ? (
+                  getEligibleTeachers(selectedSubject).length > 0 ? (
+                    <ul className="space-y-1">
+                      {getEligibleTeachers(selectedSubject).map((teacher) => (
+                        <li key={teacher.id} className="text-sm">
+                          {teacher.name} - {teacherAssignments[teacher.name]?.assigned || 0}/{teacher.classesPerWeek} classes assigned
+                        </li>
+                      ))}
+                    </ul>
                   ) : (
-                    <div className="text-destructive">
-                      No eligible teachers available for this subject
-                    </div>
-                  )}
-                </div>
+                    <p className="text-muted-foreground">No teachers available for this subject</p>
+                  )
+                ) : (
+                  <p className="text-muted-foreground">Select a subject first</p>
+                )}
               </div>
-            )}
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button 
-              onClick={handleAssignSlot}
-              disabled={!selectedSubject || getEligibleTeachers(selectedSubject).length === 0}
-            >
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAssignSlot}>
               Assign
             </Button>
           </DialogFooter>
@@ -942,60 +994,37 @@ export default function TimetableGenerator() {
       <Dialog open={editTeacherDialogOpen} onOpenChange={setEditTeacherDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit Teacher Workload</DialogTitle>
+            <DialogTitle>
+              Edit Teacher Load
+              {selectedTeacher && <span className="ml-2 text-sm font-normal">({selectedTeacher.name})</span>}
+            </DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="teacherName" className="text-right">
-                Teacher Name
-              </Label>
-              <div className="col-span-3 font-medium">
-                {selectedTeacher?.name}
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="maxClasses" className="text-right">
-                Max Classes Per Week
+                Max Classes/Week
               </Label>
               <Input
                 id="maxClasses"
                 type="number"
-                min="1"
-                max="30"
-                className="col-span-3"
+                min={1}
+                max={40}
                 value={editedClassesPerWeek}
-                onChange={(e) => setEditedClassesPerWeek(parseInt(e.target.value) || 0)}
+                onChange={(e) => setEditedClassesPerWeek(Number(e.target.value))}
+                className="col-span-3"
               />
             </div>
             
-            <div className="grid grid-cols-4 items-center gap-4">
-              <div className="text-right text-sm font-medium">
-                Subjects
-              </div>
-              <div className="col-span-3">
-                <div className="flex flex-wrap gap-1">
-                  {selectedTeacher?.subjects.map(subject => (
-                    <span 
-                      key={subject} 
-                      className="px-2 py-0.5 bg-muted rounded-full text-xs"
-                    >
-                      {subject}
-                    </span>
+            {selectedTeacher && (
+              <div className="text-sm">
+                <label className="block font-medium mb-1">Subjects:</label>
+                <ul className="list-disc pl-4">
+                  {selectedTeacher.subjects.map((subject, index) => (
+                    <li key={index}>{subject}</li>
                   ))}
-                </div>
+                </ul>
               </div>
-            </div>
-            
-            <div className="col-span-4">
-              <div className="bg-muted/20 p-3 rounded-md text-sm">
-                <p className="font-medium text-foreground">Recommended Workload:</p>
-                <p className="text-muted-foreground mt-1">
-                  Based on subjects taught and class requirements, 
-                  {selectedTeacher && calculateRecommendedWorkload(selectedTeacher)} classes per week is recommended.
-                </p>
-              </div>
-            </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditTeacherDialogOpen(false)}>
@@ -1025,55 +1054,3 @@ function formatTime(timeString: string): string {
   }
 }
 
-// Helper function to calculate recommended workload for a teacher
-function calculateRecommendedWorkload(teacher: Teacher): string {
-  // Get subjects from session storage
-  const storedSubjects = sessionStorage.getItem('subjects');
-  if (!storedSubjects) return "unknown";
-  
-  const subjects = JSON.parse(storedSubjects) as Subject[];
-  
-  // Calculate total classes needed for subjects this teacher teaches
-  let totalClassesNeeded = 0;
-  const teacherSubjects = teacher.subjects;
-  
-  teacherSubjects.forEach(subjectName => {
-    const subject = subjects.find(s => s.name === subjectName);
-    if (subject) {
-      totalClassesNeeded += subject.classesPerWeek;
-    }
-  });
-  
-  // Calculate how many teachers teach each of these subjects
-  const teachersPerSubject: Record<string, number> = {};
-  
-  // Get teachers from session storage
-  const storedTeachers = sessionStorage.getItem('teachers');
-  if (storedTeachers) {
-    const allTeachers = JSON.parse(storedTeachers) as Teacher[];
-    
-    teacherSubjects.forEach(subjectName => {
-      teachersPerSubject[subjectName] = allTeachers.filter(t => 
-        t.subjects.includes(subjectName)
-      ).length;
-    });
-  }
-  
-  // Calculate recommended workload based on fair distribution
-  let recommendedWorkload = 0;
-  
-  teacherSubjects.forEach(subjectName => {
-    const subject = subjects.find(s => s.name === subjectName);
-    if (subject && teachersPerSubject[subjectName]) {
-      // Fair share of classes for this subject
-      const fairShare = Math.ceil(subject.classesPerWeek / teachersPerSubject[subjectName]);
-      recommendedWorkload += fairShare;
-    }
-  });
-  
-  // Provide a range for flexibility
-  const minRecommended = Math.max(5, recommendedWorkload - 2);
-  const maxRecommended = recommendedWorkload + 2;
-  
-  return `${minRecommended}-${maxRecommended}`;
-}

@@ -11,11 +11,12 @@ import {
   TableHeader, 
   TableRow 
 } from '@/components/ui/table';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { ArrowLeft, Download, Plus, Printer, Wand2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
@@ -83,6 +84,12 @@ type TeacherAssignment = {
   };
 };
 
+type ResourceAlert = {
+  type: 'warning' | 'error' | 'info';
+  title: string;
+  description: string;
+};
+
 const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default function TimetableGenerator() {
@@ -111,6 +118,9 @@ export default function TimetableGenerator() {
   const [subjectDistribution, setSubjectDistribution] = useState<SubjectDistribution>({});
   const [teacherAssignments, setTeacherAssignments] = useState<TeacherAssignment>({});
   
+  // Resources alerts for warnings and information
+  const [resourceAlerts, setResourceAlerts] = useState<ResourceAlert[]>([]);
+  
   // Fetch saved data from session storage
   useEffect(() => {
     const storedClass = sessionStorage.getItem('selectedClass');
@@ -135,6 +145,9 @@ export default function TimetableGenerator() {
     
     // Initialize empty timetable
     initializeTimetable();
+    
+    // Validate resources
+    validateResources();
   }, []);
   
   // Re-initialize timetable when periods change
@@ -143,6 +156,75 @@ export default function TimetableGenerator() {
       initializeTimetable();
     }
   }, [periods]);
+  
+  // Validate resources when subjects or teachers change
+  useEffect(() => {
+    validateResources();
+  }, [subjects, teachers, periods]);
+  
+  const validateResources = () => {
+    const alerts: ResourceAlert[] = [];
+    
+    // Check if we have subjects
+    if (subjects.length === 0) {
+      alerts.push({
+        type: 'warning',
+        title: 'No subjects defined',
+        description: 'Please go back and define subjects before generating a timetable.'
+      });
+    }
+    
+    // Check if we have teachers
+    if (teachers.length === 0) {
+      alerts.push({
+        type: 'warning',
+        title: 'No teachers defined',
+        description: 'Please go back and define teachers before generating a timetable.'
+      });
+    }
+    
+    // Check for subjects with no assigned teachers
+    const subjectsWithoutTeachers: string[] = [];
+    subjects.forEach(subject => {
+      const hasTeacher = teachers.some(teacher => teacher.subjects.includes(subject.name));
+      if (!hasTeacher) {
+        subjectsWithoutTeachers.push(subject.name);
+      }
+    });
+    
+    if (subjectsWithoutTeachers.length > 0) {
+      alerts.push({
+        type: 'warning',
+        title: 'Subjects without teachers',
+        description: `The following subjects have no assigned teachers: ${subjectsWithoutTeachers.join(', ')}`
+      });
+    }
+    
+    // Calculate total required classes vs available periods
+    const totalRequiredClasses = subjects.reduce((total, subject) => total + subject.classesPerWeek, 0);
+    const regularPeriods = periods.filter(p => p.type === 'Regular').length;
+    const totalAvailablePeriods = regularPeriods * weekDays.length;
+    
+    if (totalRequiredClasses > totalAvailablePeriods) {
+      alerts.push({
+        type: 'error',
+        title: 'Insufficient time slots',
+        description: `Required classes (${totalRequiredClasses}) exceed available periods (${totalAvailablePeriods}). Consider reducing subject classes or adding more periods.`
+      });
+    }
+    
+    // Check teacher capacity
+    const totalTeacherCapacity = teachers.reduce((total, teacher) => total + teacher.classesPerWeek, 0);
+    if (totalTeacherCapacity < totalRequiredClasses) {
+      alerts.push({
+        type: 'warning',
+        title: 'Insufficient teacher capacity',
+        description: `Teacher capacity (${totalTeacherCapacity} classes) is less than required classes (${totalRequiredClasses}). Some classes may not be assigned.`
+      });
+    }
+    
+    setResourceAlerts(alerts);
+  };
   
   const initializeSubjectDistribution = (subjectsList: Subject[]) => {
     const distribution: SubjectDistribution = {};
@@ -307,6 +389,9 @@ export default function TimetableGenerator() {
       title: "Teacher Updated",
       description: `Maximum classes per week for ${selectedTeacher.name} updated to ${editedClassesPerWeek}.`,
     });
+    
+    // Revalidate resources
+    validateResources();
   };
   
   // Calculate total classes required and allocated
@@ -325,7 +410,7 @@ export default function TimetableGenerator() {
     return required > 0 ? Math.round((allocated / required) * 100) : 0;
   };
   
-  // Advanced timetable generation algorithm
+  // Enhanced timetable generation algorithm with better error handling
   const handleGenerateTimetable = () => {
     // Reset the timetable
     initializeTimetable();
@@ -334,6 +419,17 @@ export default function TimetableGenerator() {
     // Reset tracking
     initializeSubjectDistribution(subjects);
     initializeTeacherAssignments(teachers);
+    
+    // Validate resources first
+    validateResources();
+    if (resourceAlerts.some(alert => alert.type === 'error')) {
+      toast({
+        title: "Cannot Generate Timetable",
+        description: "Please resolve error conditions before generating the timetable.",
+        variant: "destructive"
+      });
+      return;
+    }
     
     // Get all regular periods sorted by time
     const regularPeriods = periods
@@ -361,6 +457,12 @@ export default function TimetableGenerator() {
       return b.classesPerWeek - a.classesPerWeek;
     });
     
+    // Track allocation failures for reporting
+    const allocationIssues = {
+      noEligibleTeachers: new Set<string>(),
+      noAvailableSlots: new Set<string>(),
+    };
+    
     // For each subject, distribute classes across the week
     subjectPriorities.forEach(subject => {
       let assignedClasses = 0;
@@ -386,7 +488,16 @@ export default function TimetableGenerator() {
         
         if (eligibleTeachers.length === 0) {
           console.log(`No eligible teachers for ${subject.name} on ${dayWithFewestAssignments}`);
-          break; // No teachers available, can't assign more classes
+          allocationIssues.noEligibleTeachers.add(`${subject.name} on ${dayWithFewestAssignments}`);
+          // Mark this day as fully booked for this subject
+          assignedDays[dayWithFewestAssignments] = 999;
+          
+          // If all days are marked as booked, break out of the loop
+          if (Object.values(assignedDays).every(count => count === 999)) {
+            break;
+          }
+          
+          continue;
         }
         
         // Sort teachers by workload (least busy first)
@@ -403,6 +514,7 @@ export default function TimetableGenerator() {
         
         if (availableSlots.length === 0) {
           console.log(`No available slots on ${dayWithFewestAssignments}`);
+          allocationIssues.noAvailableSlots.add(dayWithFewestAssignments);
           // Mark this day as fully booked for this iteration
           assignedDays[dayWithFewestAssignments] = 999;
           continue;
@@ -528,10 +640,29 @@ export default function TimetableGenerator() {
       return subjectDistribution[subject.name].assigned < subject.classesPerWeek;
     });
     
+    // Prepare detailed warnings
+    const warnings = [];
+    
+    if (allocationIssues.noEligibleTeachers.size > 0) {
+      warnings.push(`No eligible teachers for: ${Array.from(allocationIssues.noEligibleTeachers).join(', ')}`);
+    }
+    
+    if (allocationIssues.noAvailableSlots.size > 0) {
+      warnings.push(`No available slots on: ${Array.from(allocationIssues.noAvailableSlots).join(', ')}`);
+    }
+    
     if (unfulfilledSubjects.length > 0) {
+      const subjectDetails = unfulfilledSubjects.map(subject => {
+        const assigned = subjectDistribution[subject.name].assigned;
+        const total = subject.classesPerWeek;
+        return `${subject.name} (${assigned}/${total})`;
+      }).join(', ');
+      
+      warnings.push(`Incomplete allocation for: ${subjectDetails}`);
+      
       toast({
         title: "Timetable Generated With Warnings",
-        description: `Could not fulfill all requirements for ${unfulfilledSubjects.length} subjects. Consider adjusting teacher availability or class requirements.`,
+        description: `Could not fulfill all requirements for ${unfulfilledSubjects.length} subjects. Some slots are intentionally left empty.`,
         variant: "destructive"
       });
     } else {
@@ -784,6 +915,18 @@ export default function TimetableGenerator() {
           </Card>
         </div>
 
+        {/* Resource Alerts */}
+        {resourceAlerts.length > 0 && (
+          <div className="space-y-2 mb-6">
+            {resourceAlerts.map((alert, index) => (
+              <Alert key={index} variant={alert.type === 'error' ? 'destructive' : 'default'}>
+                <AlertTitle>{alert.title}</AlertTitle>
+                <AlertDescription>{alert.description}</AlertDescription>
+              </Alert>
+            ))}
+          </div>
+        )}
+
         {/* Subject Allocation Cards */}
         <Card className="w-full mb-6">
           <CardHeader className="pb-2">
@@ -935,6 +1078,9 @@ export default function TimetableGenerator() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Assign Class</DialogTitle>
+            <DialogDescription>
+              Assign a subject to this time slot. A teacher will be automatically selected based on availability.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div>
@@ -1053,4 +1199,3 @@ function formatTime(timeString: string): string {
     return timeString; // Return original if parsing fails
   }
 }
-
